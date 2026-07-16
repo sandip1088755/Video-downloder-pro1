@@ -74,15 +74,6 @@
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge" />
-
-        <!-- Disable default WorkManager initializer: we provide our own Configuration
-             via Application.Configuration.Provider so Hilt-injected workers can be created. -->
-        <provider
-            android:name="androidx.work.impl.WorkManagerInitializer"
-            android:authorities="${applicationId}.workmanager-init"
-            android:exported="false"
-            tools:node="remove" />
-
     </application>
 
 </manifest>
