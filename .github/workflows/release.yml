@@ -1,6 +1,5 @@
 name: Build Release APK & AAB
 
-# Trigger manually from the GitHub app/website, or automatically on every push to main.
 on:
   workflow_dispatch:
   push:
@@ -20,27 +19,29 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # The gradle-wrapper.jar binary is not committed to this repo (it can't be produced
-      # in a text-only environment). This step generates it fresh using a pinned Gradle
-      # version, then all subsequent steps use the normal ./gradlew wrapper.
       - name: Generate Gradle wrapper
         uses: gradle/actions/setup-gradle@v4
       - run: gradle wrapper --gradle-version 8.9
       - run: chmod +x ./gradlew
 
-      # Only runs if you've added the four secrets below in
-      # Repo Settings -> Secrets and variables -> Actions.
-      # Without them, the app still builds, just signed with the debug key.
       - name: Decode signing keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
-          cat > keystore.properties <<EOF
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > app/release.keystore
+            cat > keystore.properties <<EOF
           storeFile=release.keystore
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
           EOF
+          else
+            echo "No keystore secret found - release build will use the debug signing key."
+          fi
 
       - name: Build release APK
         run: ./gradlew assembleRelease --stacktrace
