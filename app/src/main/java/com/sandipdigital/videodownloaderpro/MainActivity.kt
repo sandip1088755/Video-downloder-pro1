@@ -1,82 +1,65 @@
 package com.sandipdigital.videodownloaderpro
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.sandipdigital.videodownloaderpro.data.datastore.SettingsDataStore
-import com.sandipdigital.videodownloaderpro.ui.navigation.AppNavGraph
-import com.sandipdigital.videodownloaderpro.ui.navigation.Destination
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.sandipdigital.videodownloaderpro.ui.RootViewModel
+import com.sandipdigital.videodownloaderpro.ui.navigation.AppRoot
 import com.sandipdigital.videodownloaderpro.ui.theme.VideoDownloaderProTheme
+import com.sandipdigital.videodownloaderpro.util.IncomingLinkHolder
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    @Inject
-    lateinit var settingsDataStore: SettingsDataStore
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op either way */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
+        requestNotificationPermissionIfNeeded()
+        handleIncomingShareIntent()
 
         setContent {
-            val settings by settingsDataStore.settingsFlow.collectAsState(
-                initial = com.sandipdigital.videodownloaderpro.data.datastore.AppSettings()
-            )
+            val rootViewModel: RootViewModel = hiltViewModel()
+            val themeMode by rootViewModel.themeMode.collectAsState()
+            val dynamicColor by rootViewModel.dynamicColor.collectAsState()
 
-            VideoDownloaderProTheme(
-                themeMode = settings.themeMode,
-                useDynamicColor = settings.useDynamicColor
-            ) {
-                MainScaffold()
+            VideoDownloaderProTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
+                AppRoot()
             }
         }
     }
-}
 
-@Composable
-private fun MainScaffold() {
-    val navController = rememberNavController()
-
-    Scaffold(
-        bottomBar = {
-            val backStackEntry by navController.currentBackStackEntryAsState()
-            val currentRoute = backStackEntry?.destination?.route
-            // Hide bottom bar on the full-screen player.
-            if (currentRoute?.startsWith("player/") != true) {
-                NavigationBar {
-                    Destination.bottomNavItems.forEach { destination ->
-                        NavigationBarItem(
-                            selected = currentRoute == destination.route,
-                            onClick = {
-                                navController.navigate(destination.route) {
-                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { Text(destination.label) }
-                        )
-                    }
-                }
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-    ) { innerPadding ->
-        AppNavGraph(navController = navController)
-        Modifier.padding(innerPadding) // padding consumed inside each screen's own Scaffold
+    }
+
+    private fun handleIncomingShareIntent() {
+        if (intent?.action == android.content.Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+            val url = sharedText?.let { text ->
+                Regex("https://\\S+").find(text)?.value
+            }
+            if (url != null) IncomingLinkHolder.set(url)
+        }
     }
 }

@@ -5,70 +5,55 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.work.ForegroundInfo
 import com.sandipdigital.videodownloaderpro.R
-import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class NotificationHelper @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    companion object {
-        const val CHANNEL_ID = "download_channel"
-        private const val COMPLETED_NOTIF_BASE_ID = 10_000
-    }
+object NotificationHelper {
+    const val CHANNEL_DOWNLOADS = "downloads_channel"
+    const val CHANNEL_COMPLETE = "downloads_complete_channel"
 
-    init {
+    fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.download_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = context.getString(R.string.download_channel_desc)
-            }
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            val progressChannel = NotificationChannel(
+                CHANNEL_DOWNLOADS,
+                "Active downloads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Shows progress of ongoing downloads" }
+
+            val completeChannel = NotificationChannel(
+                CHANNEL_COMPLETE,
+                "Completed downloads",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "Notifies when a download finishes" }
+
+            manager.createNotificationChannel(progressChannel)
+            manager.createNotificationChannel(completeChannel)
         }
     }
 
-    fun buildProgressForegroundInfo(downloadId: String, title: String, progress: Int): ForegroundInfo {
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+    fun buildProgressNotification(
+        context: Context,
+        title: String,
+        progress: Int,
+        speedLabel: String,
+        etaLabel: String
+    ): androidx.core.app.NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, CHANNEL_DOWNLOADS)
             .setContentTitle(title)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentText("$progress% • $speedLabel • ETA $etaLabel")
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
-            .setProgress(100, progress, progress == 0)
-            .build()
-        val notifId = downloadId.hashCode()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(notifId, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(notifId, notification)
-        }
-    }
-
-    fun updateProgressNotification(downloadId: String, progress: Int) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setContentTitle("Downloading…")
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setProgress(100, progress, false)
-            .setContentText("$progress%")
-            .build()
-        manager.notify(downloadId.hashCode(), notification)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
     }
 
-    fun showCompletedNotification(downloadId: String, fileName: String) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setContentTitle("Download complete")
-            .setContentText(fileName)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+    fun buildCompleteNotification(context: Context, title: String, success: Boolean): NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, CHANNEL_COMPLETE)
+            .setContentTitle(if (success) "Download complete" else "Download failed")
+            .setContentText(title)
+            .setSmallIcon(R.drawable.ic_notification)
             .setAutoCancel(true)
-            .build()
-        manager.notify(COMPLETED_NOTIF_BASE_ID + downloadId.hashCode(), notification)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
     }
 }

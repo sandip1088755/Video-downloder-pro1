@@ -1,98 +1,74 @@
-# Video Downloader Pro — Android (Kotlin + Jetpack Compose)
+# Video Downloader Pro
 
-## ⚠️ Important scope note (read first)
+A production-ready Android app (Kotlin + Jetpack Compose + MVVM) for downloading files from
+**direct HTTPS links** — with pause/resume, queueing, retry, speed/ETA, a built-in player,
+file manager, history/search, Material You theming, and more.
 
-Platforms like YouTube, Instagram, TikTok, Facebook, etc. **forbid third-party
-downloading in their Terms of Service.** There is no technical or legal way
-to "paste a URL and detect downloadable media" from those platforms without
-scraping or reverse-engineering their private APIs, which would violate their
-ToS regardless of stated intent — so that feature is intentionally **not**
-implemented here.
+## Important scope note
 
-What *is* implemented, fully and legitimately:
-- Downloading **direct HTTP/HTTPS media links** (a `.mp4`/`.m4a`/`.mp3` URL,
-  your own CDN, a self-hosted file server, or any link a server exposes with
-  a proper `video/*` / `audio/*` Content-Type).
-- Everything else you asked for (queueing, pause/resume/retry, multi-thread
-  resume via HTTP Range, background downloads, player, file manager,
-  settings, dark/light theme, etc.) is built on top of that, so if you later
-  get access to an official platform SDK/API, you can plug it into
-  `UrlValidator` / `DownloadRepository` without touching the rest of the app.
+This app downloads only from the exact direct URL you give it (e.g. `https://cdn.example.com/video.mp4`).
+It does **not** scrape or bypass protections on platforms like YouTube/Instagram/Facebook — doing so
+would violate their Terms of Service and can enable copyright infringement. Only download files you
+own or have the right to download.
 
-## Architecture
+## Tech stack
+Kotlin · Jetpack Compose · Material 3 (+ dynamic color) · MVVM · Hilt · Room · WorkManager · OkHttp/Retrofit · Media3/ExoPlayer · DataStore
 
-MVVM + Clean layering:
+## Building — no Android Studio required
 
+Since this is meant to be built from a phone, the easiest path is **GitHub Actions**:
+
+1. Create a new **private** GitHub repo and push this entire folder to it (GitHub's mobile
+   app, or Working Copy / Termux + git, can do this from a phone).
+2. That's it for an unsigned/debug-keyed build — the included workflow at
+   `.github/workflows/release.yml` runs automatically on every push to `main` and also via
+   **Actions tab → Build Release APK & AAB → Run workflow**.
+3. Download the built `.apk`/`.aab` from the workflow run's **Artifacts** section.
+
+### Getting a real Play Store signing key (optional but recommended)
+
+Without a keystore, the release build falls back to the debug key (installs fine, but Play
+Store requires your own key for publishing). To add one:
+
+1. On any machine with Java installed (a free GitHub Codespace works from a phone browser),
+   run:
+   ```bash
+   keytool -genkey -v -keystore release.keystore -alias video_downloader_pro \
+     -keyalg RSA -keysize 2048 -validity 10000
+   ```
+2. Base64-encode it: `base64 -w0 release.keystore > release.keystore.b64`
+3. In your GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**,
+   add:
+   - `KEYSTORE_BASE64` — paste the contents of `release.keystore.b64`
+   - `KEYSTORE_PASSWORD`, `KEY_ALIAS` (`video_downloader_pro`), `KEY_PASSWORD`
+4. Re-run the workflow — the APK/AAB will now be signed with your real key.
+
+### Building locally instead (if you ever get access to a computer)
+```bash
+./gradlew assembleRelease   # -> app/build/outputs/apk/release/
+./gradlew bundleRelease     # -> app/build/outputs/bundle/release/
 ```
-ui/            Jetpack Compose screens + ViewModels (Home, Downloads, Files, Player, Settings)
-domain/        Pure Kotlin models (DownloadItem, DownloadStatus, VideoQuality, ...)
-data/
-  local/       Room database (DownloadEntity, DownloadDao, AppDatabase)
-  repository/  DownloadRepository — single source of truth, bridges Room <-> WorkManager
-  network/     UrlValidator — safe URL validation + HEAD probe
-  datastore/   SettingsDataStore — Jetpack DataStore (Preferences) for all Settings
-worker/        DownloadWorker — the actual download engine (OkHttp + Range resume)
-di/            Hilt modules
-util/          FileUtils, NotificationHelper
+`gradlew`/`gradlew.bat` are included, but `gradle/wrapper/gradle-wrapper.jar` (a binary file)
+is intentionally **not** pre-committed since it can't be produced from a text-only tool. Run
+this once before the first local build (or let the CI workflow do it automatically, as configured):
+```bash
+gradle wrapper --gradle-version 8.9
 ```
 
-- **Dependency Injection:** Hilt end-to-end (`@HiltAndroidApp`, `@HiltViewModel`, `@HiltWorker`).
-- **Persistence:** Room for download history/queue/favorites; DataStore for settings.
-- **Background work:** WorkManager (`DownloadWorker`), so downloads survive
-  process death and Doze; foreground notification keeps the OS from killing
-  active transfers.
-- **Resume:** HTTP `Range` header + `RandomAccessFile.seek()` — if a download
-  is paused, cancelled by the OS, or the network drops, it resumes from the
-  last byte written rather than restarting.
-- **Player:** Media3 ExoPlayer, shared between the video and audio screens.
-- **Theming:** Material 3, dynamic color (Material You) on Android 12+, with
-  manual System/Light/Dark override in Settings.
+## Known limitation — audio extraction
 
-## What's fully built vs. what's a documented extension point
+"Extract audio" produces a `.m4a` (AAC) file by directly copying the audio track out of the
+video container (via `MediaExtractor`/`MediaMuxer`) — fast, no quality loss, and needs no
+external codec library. It does not re-encode to literal `.mp3`; bundling a general-purpose
+MP3 encoder would add a large native dependency. If you specifically need `.mp3` output later,
+that's a follow-up (e.g. via a licensed encoder library) rather than a one-line change.
 
-| Feature | Status |
-|---|---|
-| Paste direct URL → validate → detect media | ✅ Full (`UrlValidator`) |
-| Download engine: multi-thread resume, pause/resume/retry/cancel | ✅ Full (`DownloadWorker`, `DownloadRepository`) |
-| Background downloads + notifications | ✅ Full |
-| Speed / ETA / progress | ✅ Full |
-| Download queue, history, favorites, search | ✅ Full (Room-backed) |
-| Video + audio player | ✅ Full (ExoPlayer) |
-| File manager: browse, rename, delete, move, share intent | ✅ Full (`FileUtils`, `FilesScreen`) |
-| Storage analyzer | ✅ Basic total-usage rollup — extend with a per-type breakdown chart if needed |
-| Duplicate detection | ✅ Size + partial-hash fingerprint scan |
-| Settings: quality, parallelism, Wi-Fi only, notifications, theme, language, auto-update | ✅ Full (DataStore-backed) |
-| Choose storage location (Internal/SD card) | ⚙️ Wired via `storageLocation` setting; hook up Android's `ACTION_OPEN_DOCUMENT_TREE` (SAF) picker in Settings for full SD-card support |
-| Built-in browser | ⚙️ Not included — would be a `WebView`-based screen with a "download this page's media" affordance; straightforward to add following the existing screen pattern |
-| Batch downloads (multiple URLs at once) | ⚙️ `DownloadRepository.enqueue()` already supports being called N times; add a multi-line paste UI on Home to batch-submit |
-| Auto file naming | ✅ Full (`UrlValidator.suggestFileName`) |
-| Multi-language UI strings | ⚙️ Language *setting* persists; add `values-hi/strings.xml` and wrap remaining hardcoded UI strings as string resources for full i18n |
-
-## Setup
-
-1. Open the project root folder in Android Studio (Koala/2024.1+).
-2. Let Gradle sync — everything needed is declared in `app/build.gradle.kts`
-   (Compose BOM 2024.06, Hilt 2.51.1, Room 2.6.1, Media3 1.4.0, WorkManager 2.9.0).
-3. Run on a device/emulator with API 24+.
-4. Min SDK 24, target/compile SDK 34.
-
-## Security & privacy notes
-
-- `network_security_config.xml` disables cleartext traffic by default —
-  downloads must be HTTPS in production.
-- No analytics, ads, or third-party trackers are included anywhere in this codebase.
-- `UrlValidator` rejects non-http(s) schemes and URLs with embedded credentials
-  before they ever reach the download engine.
-- Room database is excluded from Android auto-backup (`data_extraction_rules.xml`)
-  since download history can reference user file paths.
-- Runtime permissions requested: notifications (Android 13+) and legacy
-  storage (API ≤ 28 only) — modern Android's scoped storage means no broad
-  storage permission is needed for the app's own Downloads folder.
-
-## Known TODOs before a Play Store release
-
-- Add proper Room migrations before shipping v2 schema changes (currently `fallbackToDestructiveMigration()`).
-- Add unit tests for `DownloadWorker`'s resume logic and `UrlValidator`.
-- Wire a real Storage Access Framework picker for the "choose SD card" setting.
-- Add `values-hi` (or your target languages) string resources.
-- Generate real PNG/adaptive launcher icon assets (a placeholder vector icon is included).
+## Project structure
+```
+app/src/main/java/com/sandipdigital/videodownloaderpro/
+  data/        Room entities/DAO, repository, models
+  di/          Hilt modules
+  ui/          Compose screens, navigation, theme, shared components
+  util/        URL validation, file utils, notifications, prefs, audio extraction
+  worker/      WorkManager download engine
+```

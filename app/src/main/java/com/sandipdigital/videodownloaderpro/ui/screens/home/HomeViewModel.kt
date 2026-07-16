@@ -1,98 +1,64 @@
 package com.sandipdigital.videodownloaderpro.ui.screens.home
 
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.sandipdigital.videodownloaderpro.data.datastore.SettingsDataStore
-import com.sandipdigital.videodownloaderpro.data.network.UrlCheckResult
-import com.sandipdigital.videodownloaderpro.data.network.UrlValidator
+import com.sandipdigital.videodownloaderpro.data.model.RemoteFileInfo
 import com.sandipdigital.videodownloaderpro.data.repository.DownloadRepository
-import com.sandipdigital.videodownloaderpro.domain.model.MediaType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
-data class HomeUiState(
-    val urlInput: String = "",
-    val isChecking: Boolean = false,
-    val detected: UrlCheckResult.Valid? = null,
-    val errorMessage: String? = null,
-    val justEnqueued: Boolean = false
-)
+sealed class FetchState {
+    object Idle : FetchState()
+    object Loading : FetchState()
+    data class Success(val info: RemoteFileInfo) : FetchState()
+    data class Error(val message: String) : FetchState()
+}
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val urlValidator: UrlValidator,
-    private val repository: DownloadRepository,
-    private val settingsDataStore: SettingsDataStore
+    private val repository: DownloadRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(HomeUiState())
-    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private val _url = MutableStateFlow(com.sandipdigital.videodownloaderpro.util.IncomingLinkHolder.consume().orEmpty())
+    val url: StateFlow<String> = _url.asStateFlow()
 
-    fun onUrlChanged(newUrl: String) {
-        _uiState.value = _uiState.value.copy(urlInput = newUrl, detected = null, errorMessage = null)
+    private val _fetchState = MutableStateFlow<FetchState>(FetchState.Idle)
+    val fetchState: StateFlow<FetchState> = _fetchState.asStateFlow()
+
+    private val _downloadStarted = MutableStateFlow(false)
+    val downloadStarted: StateFlow<Boolean> = _downloadStarted.asStateFlow()
+
+    fun onUrlChanged(value: String) {
+        _url.value = value
+        _fetchState.value = FetchState.Idle
     }
 
-    fun detectMedia() {
-        val url = _uiState.value.urlInput.trim()
-        if (url.isEmpty()) return
-
-        _uiState.value = _uiState.value.copy(isChecking = true, errorMessage = null)
+    fun fetchInfo() {
+        val current = _url.value
         viewModelScope.launch {
-            when (val result = urlValidator.probe(url)) {
-                is UrlCheckResult.Valid -> _uiState.value = _uiState.value.copy(isChecking = false, detected = result)
-                is UrlCheckResult.Invalid -> _uiState.value =
-                    _uiState.value.copy(isChecking = false, errorMessage = result.reason)
-            }
+            _fetchState.value = FetchState.Loading
+            repository.fetchFileInfo(current)
+                .onSuccess { _fetchState.value = FetchState.Success(it) }
+                .onFailure { _fetchState.value = FetchState.Error(it.message ?: "Could not read this link") }
         }
     }
 
-    fun confirmDownload(mediaType: MediaType) {
-        val detected = _uiState.value.detected ?: return
+    fun startDownload(extractAudio: Boolean) {
+        val state = _fetchState.value
+        if (state !is FetchState.Success) return
         viewModelScope.launch {
-            val settings = settingsDataStore.settingsFlow.first()
-
-            // Duplicate detection before we spend any bandwidth.
-            val duplicate = repository.findDuplicate(detected.suggestedFileName, detected.contentLengthBytes)
-            if (duplicate != null) {
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "This file already exists in your downloads: ${duplicate.title}"
-                )
-                return@launch
-            }
-
-            val destDir = resolveDestinationDir(settings.storageLocation)
-            repository.enqueue(
-                url = detected.url,
-                title = detected.suggestedFileName,
-                mediaType = mediaType,
-                destinationDir = destDir,
-                fileName = detected.suggestedFileName,
-                maxParallel = settings.maxParallelDownloads,
-                wifiOnly = settings.wifiOnly
-            )
-
-            _uiState.value = HomeUiState(justEnqueued = true)
+            repository.enqueueDownload(state.info, extractAudio)
+            _downloadStarted.value = true
+            _url.value = ""
+            _fetchState.value = FetchState.Idle
         }
     }
 
-    private fun resolveDestinationDir(customPath: String): File {
-        if (customPath.isNotBlank()) {
-            val custom = File(customPath)
-            if (custom.exists() || custom.mkdirs()) return custom
-        }
-        // Default: app-specific external directory — no extra storage permission
-        // needed on modern Android, and it's automatically cleaned up on uninstall.
-        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-    }
-
-    fun dismissError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
+    fun consumeDownloadStartedFlag() {
+        _downloadStarted.value = false
     }
 }

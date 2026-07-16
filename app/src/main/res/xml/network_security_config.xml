@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Enforces HTTPS-only traffic app-wide. Cleartext (HTTP) is blocked. -->
 <network-security-config>
-    <!-- Cleartext disabled by default: production downloads must be HTTPS -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />

@@ -2,49 +2,49 @@ package com.sandipdigital.videodownloaderpro.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
-import com.sandipdigital.videodownloaderpro.data.datastore.AppThemeMode
+import com.sandipdigital.videodownloaderpro.util.ThemeMode
 
 private val LightColors = lightColorScheme(
-    primary = BluePrimary,
-    secondary = TealSecondary,
-    tertiary = AmberTertiary,
-    background = LightBackground,
-    surface = LightSurface,
-    error = ErrorRed
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40,
+    background = BackgroundLight,
+    surface = SurfaceLight
 )
 
 private val DarkColors = darkColorScheme(
-    primary = BluePrimaryDark,
-    secondary = TealSecondaryDark,
-    tertiary = AmberTertiaryDark,
-    background = DarkBackground,
-    surface = DarkSurface,
-    error = ErrorRedDark
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80,
+    background = BackgroundDark,
+    surface = SurfaceDark
 )
 
 @Composable
 fun VideoDownloaderProTheme(
-    themeMode: AppThemeMode = AppThemeMode.SYSTEM,
-    useDynamicColor: Boolean = true,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
-    val darkTheme = when (themeMode) {
-        AppThemeMode.SYSTEM -> systemDark
-        AppThemeMode.LIGHT -> false
-        AppThemeMode.DARK -> true
+    val useDark = when (themeMode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
     }
 
     val context = LocalContext.current
     val colorScheme = when {
-        useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        darkTheme -> DarkColors
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        useDark -> DarkColors
         else -> LightColors
     }
 

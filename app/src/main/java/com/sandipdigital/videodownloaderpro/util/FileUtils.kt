@@ -1,55 +1,95 @@
 package com.sandipdigital.videodownloaderpro.util
 
+import android.content.Context
+import android.content.Intent
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import java.io.File
-import java.security.MessageDigest
+import java.util.Locale
+import kotlin.math.log10
+import kotlin.math.pow
 
-/**
- * Local file-system helpers used by the File Manager screen: human-readable
- * sizes, storage-usage rollups, and a lightweight duplicate scan based on
- * (fileSize + first-64KB hash) — cheap enough to run on-device without
- * hashing entire large video files.
- */
 object FileUtils {
 
-    fun humanReadableSize(bytes: Long): String = when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "%.0f KB".format(bytes / 1024.0)
-        bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
-        else -> "%.2f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+    fun downloadsDir(context: Context): File {
+        val dir = context.getExternalFilesDir("Downloads") ?: File(context.filesDir, "downloads")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
     }
 
-    /** Returns total bytes used by all files in [dir] (non-recursive is fine for our flat download folder). */
-    fun folderSizeBytes(dir: File): Long =
-        dir.listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+    fun sanitizeFileName(name: String): String {
+        val cleaned = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+        return cleaned.ifBlank { "file_${System.currentTimeMillis()}" }
+    }
 
-    /** Cheap fingerprint: size + hash of first 64KB. Good enough to flag likely duplicates without full re-read. */
-    fun quickFingerprint(file: File): String {
-        val digest = MessageDigest.getInstance("MD5")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(64 * 1024)
-            val read = input.read(buffer)
-            if (read > 0) digest.update(buffer, 0, read)
+    fun uniqueFile(dir: File, desiredName: String): File {
+        val sanitized = sanitizeFileName(desiredName)
+        var candidate = File(dir, sanitized)
+        if (!candidate.exists()) return candidate
+        val base = sanitized.substringBeforeLast('.', sanitized)
+        val ext = sanitized.substringAfterLast('.', "")
+        var counter = 1
+        while (candidate.exists()) {
+            val newName = if (ext.isNotBlank()) "${base}_$counter.$ext" else "${base}_$counter"
+            candidate = File(dir, newName)
+            counter++
         }
-        return "${file.length()}_${digest.digest().joinToString("") { "%02x".format(it) }}"
+        return candidate
     }
 
-    fun findDuplicates(files: List<File>): List<List<File>> {
-        return files.filter { it.isFile }
-            .groupBy { quickFingerprint(it) }
-            .values
-            .filter { it.size > 1 }
+    fun humanReadableBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (log10(bytes.toDouble()) / log10(1024.0)).toInt().coerceIn(0, units.size - 1)
+        val value = bytes / 1024.0.pow(digitGroups.toDouble())
+        return String.format(Locale.getDefault(), "%.1f %s", value, units[digitGroups])
     }
 
-    fun renameFile(file: File, newName: String): Boolean {
-        val target = File(file.parentFile, newName)
-        return file.renameTo(target)
+    fun humanReadableSpeed(bytesPerSecond: Long): String =
+        "${humanReadableBytes(bytesPerSecond)}/s"
+
+    fun formatEta(seconds: Long): String {
+        if (seconds < 0) return "--"
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return when {
+            h > 0 -> String.format(Locale.getDefault(), "%dh %02dm", h, m)
+            m > 0 -> String.format(Locale.getDefault(), "%dm %02ds", m, s)
+            else -> String.format(Locale.getDefault(), "%ds", s)
+        }
     }
 
-    fun moveFile(file: File, destinationDir: File): Boolean {
-        if (!destinationDir.exists()) destinationDir.mkdirs()
-        val target = File(destinationDir, file.name)
-        return file.renameTo(target)
+    fun mimeTypeForFile(file: File): String {
+        val ext = file.extension.lowercase()
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
     }
 
-    fun deleteFile(file: File): Boolean = file.delete()
+    fun contentUriFor(context: Context, file: File) =
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
+    fun shareIntent(context: Context, file: File): Intent {
+        val uri = contentUriFor(context, file)
+        return Intent(Intent.ACTION_SEND).apply {
+            type = mimeTypeForFile(file)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    fun openIntent(context: Context, file: File): Intent {
+        val uri = contentUriFor(context, file)
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeTypeForFile(file))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
+    fun renameFile(file: File, newName: String): File? {
+        val target = File(file.parentFile, sanitizeFileName(newName))
+        return if (file.renameTo(target)) target else null
+    }
+
+    fun deleteFile(file: File): Boolean = file.exists() && file.delete()
 }
